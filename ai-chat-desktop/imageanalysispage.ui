@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ImageAnalysisPage</class>
+ <widget class="QWidget" name="ImageAnalysisPage">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>820</width>
+    <height>620</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>图片分析</string>
+  </property>
+  <layout class="QVBoxLayout" name="imgLayout">
+   <item>
+    <layout class="QHBoxLayout" name="imgModelRow">
+     <item>
+      <widget class="QLabel" name="labelImgModel">
+       <property name="text">
+        <string>视觉模型</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="m_imgModel">
+       <property name="editable">
+        <bool>true</bool>
+       </property>
+       <item>
+        <property name="text">
+         <string>qwen3-vl-flash</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>qwen3-vl-plus</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>qwen-vl-max</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>qwen-vl-plus</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>qwen2.5-vl-72b-instruct</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>qwen2.5-vl-7b-instruct</string>
+        </property>
+       </item>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="imgBtnRow">
+     <item>
+      <widget class="QPushButton" name="btnImgSelect">
+       <property name="text">
+        <string>选择图片</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="btnImgAnalyze">
+       <property name="text">
+        <string>分析</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="imgSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QLabel" name="imgPreview">
+     <property name="minimumSize">
+      <size>
+       <width>360</width>
+       <height>240</height>
+      </size>
+     </property>
+     <property name="styleSheet">
+      <string>border:1px solid #cbd5e1; background:#f8fafc;</string>
+     </property>
+     <property name="text">
+      <string>未选择图片</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QTextEdit" name="imgResult">
+     <property name="readOnly">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

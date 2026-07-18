@@ -1,0 +1,415 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1040</width>
+    <height>680</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>智能笔记软件 (Qt + FastAPI + MySQL)</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QHBoxLayout" name="topLayout" stretch="0,1">
+    <item>
+     <widget class="QListWidget" name="navList">
+      <property name="minimumSize">
+       <size>
+        <width>110</width>
+        <height>0</height>
+       </size>
+      </property>
+      <property name="currentRow">
+       <number>0</number>
+      </property>
+      <item>
+       <property name="text">
+        <string>笔记</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>图片分析</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>设置</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item>
+     <widget class="QStackedWidget" name="stack">
+      <property name="currentIndex">
+       <number>0</number>
+      </property>
+      <widget class="QWidget" name="pageNotes">
+       <layout class="QVBoxLayout" name="notesLayout">
+        <item>
+         <layout class="QHBoxLayout" name="noteTitleRow">
+          <item>
+           <widget class="QLabel" name="labelTitle">
+            <property name="text">
+             <string>标题</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="m_noteTitle">
+            <property name="placeholderText">
+             <string>未命名笔记</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btnNewNote">
+            <property name="text">
+             <string>新建</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btnSaveNote">
+            <property name="toolTip">
+             <string>保存到本地 .md 文件 + MySQL（如果已连接）</string>
+            </property>
+            <property name="text">
+             <string>保存 (Ctrl+S)</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btnDeleteNote">
+            <property name="toolTip">
+             <string>删除当前在左侧列表选中的笔记</string>
+            </property>
+            <property name="text">
+             <string>删除</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QSplitter" name="notesSplit">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <widget class="QListWidget" name="m_noteList">
+           <property name="minimumSize">
+            <size>
+             <width>200</width>
+             <height>0</height>
+            </size>
+           </property>
+           <property name="toolTip">
+            <string>已保存的笔记（点击载入到编辑器；可在右侧编辑后「保存到MySQL」更新）</string>
+           </property>
+          </widget>
+          <widget class="QTextEdit" name="m_noteEdit">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="placeholderText">
+            <string>在这里写笔记… 选中文字后可做摘要/润色，或在右侧用 RAG 问答。</string>
+           </property>
+          </widget>
+          <widget class="QWidget" name="rightContainer" native="true">
+           <layout class="QVBoxLayout" name="rightLayout">
+            <item>
+             <layout class="QHBoxLayout" name="aiBtnRow">
+              <item>
+               <widget class="QPushButton" name="btnSummary">
+                <property name="text">
+                 <string>智能摘要 (Ctrl+1)</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="btnPolish">
+                <property name="text">
+                 <string>语法润色 (Ctrl+2)</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <layout class="QHBoxLayout" name="qaRow">
+              <item>
+               <widget class="QLineEdit" name="m_qaInput">
+                <property name="placeholderText">
+                 <string>向这篇笔记提问（RAG 检索增强）…</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <layout class="QHBoxLayout" name="ragRow">
+              <item>
+               <widget class="QPushButton" name="btnIndex">
+                <property name="toolTip">
+                 <string>对本篇笔记切块并向量化，存入向量库（Python 端 Chroma）供 RAG 检索</string>
+                </property>
+                <property name="text">
+                 <string>建立索引</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="btnRagQA">
+                <property name="toolTip">
+                 <string>先用向量检索召回相关片段，再让大模型基于片段回答（避免凭空编造）</string>
+                </property>
+                <property name="text">
+                 <string>RAG问答 (Ctrl+4)</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <widget class="QLabel" name="labelResult">
+              <property name="text">
+               <string>AI 结果（各功能独立分页，下方为历史记录，点击可回看）</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QTabWidget" name="m_resultTabs">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="currentIndex">
+               <number>0</number>
+              </property>
+              <widget class="QWidget" name="tabSummary">
+               <attribute name="title">
+                <string>智能摘要</string>
+               </attribute>
+               <layout class="QVBoxLayout" name="tabSummaryLayout">
+                <item>
+                 <widget class="QTextEdit" name="m_summaryView">
+                  <property name="sizePolicy">
+                   <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+                    <horstretch>0</horstretch>
+                    <verstretch>0</verstretch>
+                   </sizepolicy>
+                  </property>
+                  <property name="readOnly">
+                   <bool>true</bool>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLabel" name="labelSummaryHist">
+                  <property name="text">
+                   <string>历史记录（点击回看）</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QListWidget" name="m_summaryHistory"/>
+                </item>
+               </layout>
+              </widget>
+              <widget class="QWidget" name="tabPolish">
+               <attribute name="title">
+                <string>语法润色</string>
+               </attribute>
+               <layout class="QVBoxLayout" name="tabPolishLayout">
+                <item>
+                 <widget class="QTextEdit" name="m_polishView">
+                  <property name="sizePolicy">
+                   <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+                    <horstretch>0</horstretch>
+                    <verstretch>0</verstretch>
+                   </sizepolicy>
+                  </property>
+                  <property name="readOnly">
+                   <bool>true</bool>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLabel" name="labelPolishHist">
+                  <property name="text">
+                   <string>历史记录（点击回看）</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QListWidget" name="m_polishHistory"/>
+                </item>
+               </layout>
+              </widget>
+              <widget class="QWidget" name="tabRag">
+               <attribute name="title">
+                <string>RAG 问答</string>
+               </attribute>
+               <layout class="QVBoxLayout" name="tabRagLayout">
+                <item>
+                 <widget class="QTextEdit" name="m_ragView">
+                  <property name="sizePolicy">
+                   <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+                    <horstretch>0</horstretch>
+                    <verstretch>0</verstretch>
+                   </sizepolicy>
+                  </property>
+                  <property name="readOnly">
+                   <bool>true</bool>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLabel" name="labelRagHist">
+                  <property name="text">
+                   <string>历史记录（点击回看）</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QListWidget" name="m_ragHistory"/>
+                </item>
+               </layout>
+              </widget>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </widget>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="noteStatusRow">
+          <item>
+           <widget class="QLabel" name="m_noteStatus">
+            <property name="text">
+             <string>就绪</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="noteStatusSpacer">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="pageImage"/>
+      <widget class="QWidget" name="pageSettings"/>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>1040</width>
+     <height>21</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title">
+     <string>文件</string>
+    </property>
+    <addaction name="actionNewNote"/>
+    <addaction name="actionExit"/>
+   </widget>
+   <widget class="QMenu" name="menuEdit">
+    <property name="title">
+     <string>编辑</string>
+    </property>
+    <addaction name="actionClear"/>
+   </widget>
+   <widget class="QMenu" name="menuHelp">
+    <property name="title">
+     <string>帮助</string>
+    </property>
+    <addaction name="actionAbout"/>
+   </widget>
+   <addaction name="menuFile"/>
+   <addaction name="menuEdit"/>
+   <addaction name="menuHelp"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar">
+   <widget class="QLabel" name="statusModel">
+    <property name="geometry">
+     <rect>
+      <x>0</x>
+      <y>0</y>
+      <width>100</width>
+      <height>30</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>模型: -</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="statusMem">
+    <property name="geometry">
+     <rect>
+      <x>0</x>
+      <y>0</y>
+      <width>141</width>
+      <height>30</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>内存: -</string>
+    </property>
+   </widget>
+  </widget>
+  <action name="actionNewNote">
+   <property name="text">
+    <string>新建笔记</string>
+   </property>
+  </action>
+  <action name="actionExit">
+   <property name="text">
+    <string>退出</string>
+   </property>
+  </action>
+  <action name="actionClear">
+   <property name="text">
+    <string>清空编辑器</string>
+   </property>
+  </action>
+  <action name="actionAbout">
+   <property name="text">
+    <string>关于</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

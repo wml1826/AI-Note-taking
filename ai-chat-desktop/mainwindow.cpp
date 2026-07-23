@@ -27,6 +27,10 @@
 #include <QPixmap>
 #include <QDir>
 #include <QSet>
+#include <QCryptographicHash>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QVBoxLayout>
 #include "ui_imageanalysispage.h"
 #include "ui_settingspage.h"
 #include <windows.h>
@@ -40,6 +44,16 @@ static QString mimeFromSuffix(const QString &path) {
     if (s.endsWith(".bmp")) return "image/bmp";
     if (s.endsWith(".webp")) return "image/webp";
     return "application/octet-stream";
+}
+
+static QString stableDocumentId(const QString &path) {
+    QByteArray digest = QCryptographicHash::hash(
+        QFileInfo(path).absoluteFilePath().toUtf8(), QCryptographicHash::Sha256
+    ).toHex().left(32);
+    QString raw = QString::fromLatin1(digest);
+    return QString("%1-%2-%3-%4-%5")
+        .arg(raw.mid(0, 8), raw.mid(8, 4), raw.mid(12, 4),
+             raw.mid(16, 4), raw.mid(20, 12));
 }
 
 // 扫描系统已安装的 MySQL/MariaDB ODBC 驱动名（64 位视图）
@@ -137,7 +151,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     // 动态添加「导入」按钮到笔记按钮行
     {
         QPushButton *btnImport = new QPushButton("导入", this);
-        btnImport->setToolTip("导入 PDF / Word 文档（提取纯文本为笔记）");
+        btnImport->setToolTip("导入 PDF / Word / TXT / Markdown 为只读文献，并建立检索索引");
         ui->noteTitleRow->insertWidget(ui->noteTitleRow->count() - 1, btnImport);
         connect(btnImport, &QPushButton::clicked, this, &MainWindow::onImportFile);
     }
@@ -171,13 +185,19 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     // ---- 动态新增 UI 控件 ----
     // 笔记搜索框（插入到笔记列表上方）
     m_searchBox = new QLineEdit(this);
-    m_searchBox->setPlaceholderText("搜索笔记标题或内容…");
+    m_searchBox->setPlaceholderText("搜索文献或笔记标题、内容…");
     ui->notesLayout->insertWidget(0, m_searchBox);
     connect(m_searchBox, &QLineEdit::textChanged, this, &MainWindow::onSearchChanged);
 
     // 全局检索复选框（插入到 RAG 按钮行）
-    m_globalRag = new QCheckBox("全局检索", this);
-    m_globalRag->setToolTip("勾选后跨所有已索引笔记检索，而非仅限当前笔记");
+    m_linkDocumentsButton = new QPushButton("关联文献", this);
+    m_linkDocumentsButton->setToolTip("为当前笔记选择 RAG 问答使用的文献");
+    ui->ragRow->addWidget(m_linkDocumentsButton);
+    connect(m_linkDocumentsButton, &QPushButton::clicked,
+            this, &MainWindow::onSelectLinkedDocuments);
+
+    m_globalRag = new QCheckBox("全部文献", this);
+    m_globalRag->setToolTip("主动跨全部已索引文献检索，可能混入无关内容");
     ui->ragRow->addWidget(m_globalRag);
 
     // 自定义图片分析提示词（插入到图片分析按钮行上方）
@@ -221,6 +241,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         qWarning() << "本地结果库打开失败：" << m_db->lastError();
     } else {
         m_db->ensureResultsTable();
+        m_db->ensureContentTables();
     }
 
     if (!m_db->open(m_s.odbcDriver, m_s.dbHost, m_s.dbPort,
@@ -314,12 +335,13 @@ void MainWindow::applySettingsToClients() {
     m_chat->setApiKey(m_s.apiKey);
     m_chat->setBaseUrl(m_s.baseUrl);
     m_chat->setModel(m_s.model);
-    // 向量化（embedding）使用 DashScope text-embedding-v3：
-    // 若文本模型就是通义千问，则直接复用其 Key；否则回落到视觉 Key（同为 DashScope）
-    QString embedKey = m_s.baseUrl.contains("dashscope", Qt::CaseInsensitive)
-                           ? m_s.apiKey : m_s.visionApiKey;
-    m_rag->setApiKey(embedKey);
+    // RAG 向量化由 FastAPI 后端的本地 Jina 模型完成，无需 API Key。
+    m_rag->setApiKey(QString());
     m_rag->setBackend(m_s.backend);
+    m_rag->setRewriteConfig(
+        m_s.baseUrl.contains("dashscope", Qt::CaseInsensitive)
+            ? "dashscope" : "deepseek",
+        m_s.apiKey, m_s.baseUrl, m_s.model);
 }
 
 void MainWindow::updateStatusModel() {
@@ -347,12 +369,12 @@ bool MainWindow::tryReconnectDbSilently() {
 }
 
 void MainWindow::checkApiKeyConfig() {
-    // 文本模型（摘要/润色/RAG 生成）用 m_s.apiKey；图片分析 + RAG 向量化用 m_s.visionApiKey
+    // 文本生成使用 m_s.apiKey；仅文献图表解析需要视觉模型 Key。
     if (!m_s.apiKey.isEmpty() && !m_s.visionApiKey.isEmpty())
         return;  // 两个都配了，正常
     QString missing;
     if (m_s.apiKey.isEmpty())       missing += "\n• 文本模型 API Key（DeepSeek，用于摘要/润色/RAG 生成）";
-    if (m_s.visionApiKey.isEmpty()) missing += "\n• 视觉/向量化 API Key（通义千问，用于图片分析 + RAG 向量化）";
+    if (m_s.visionApiKey.isEmpty()) missing += "\n• 视觉模型 API Key（通义千问，仅用于文献图表解析）";
     QMessageBox::warning(this, "未配置 API Key",
         "检测到以下大模型密钥尚未在设置页填写，相关 AI 功能将无法使用：" + missing +
         "\n\n请打开左侧「设置」页填写后保存。");
@@ -369,10 +391,14 @@ void MainWindow::newNote() {
     ui->m_noteList->setCurrentItem(nullptr);
     m_currentNoteId.clear();   // 新笔记尚未分配稳定 id
     m_currentLocalPath.clear();
+    m_importSourcePath.clear();
+    m_currentContentType = "note";
+    m_linkedDocumentIds.clear();
     m_ragHistory.clear();
     m_noteDirty = false;
     updateWindowTitle();
     ui->m_noteStatus->setText("就绪（新建笔记）");
+    applyContentMode();
     populateHistories();   // 新笔记无历史，清空历史列表
 }
 
@@ -383,6 +409,24 @@ void MainWindow::setNoteButtonsEnabled(bool on) {
     ui->btnSaveNote->setEnabled(on);
     ui->btnIndex->setEnabled(on);
     ui->btnRagQA->setEnabled(on);
+    if (on) applyContentMode();
+}
+
+void MainWindow::applyContentMode() {
+    const bool isDocument = m_currentContentType == "document";
+    ui->m_noteEdit->setReadOnly(isDocument || m_previewMode);
+    ui->m_noteTitle->setReadOnly(isDocument);
+    ui->btnPolish->setEnabled(!isDocument && !m_notesBusy && !m_ragBusy);
+    ui->btnIndex->setVisible(isDocument);
+    m_linkDocumentsButton->setVisible(!isDocument);
+    if (isDocument) {
+        ui->btnRagQA->setText("当前文献问答 (Ctrl+4)");
+        m_globalRag->setChecked(false);
+    } else {
+        ui->btnRagQA->setText("关联文献问答 (Ctrl+4)");
+        m_linkDocumentsButton->setText(
+            QString("关联文献 (%1)").arg(m_linkedDocumentIds.size()));
+    }
 }
 
 void MainWindow::onSummary() {
@@ -403,6 +447,10 @@ void MainWindow::onSummary() {
 }
 
 void MainWindow::onPolish() {
+    if (m_currentContentType == "document") {
+        QMessageBox::information(this, "提示", "文献原文为只读内容，不能进行学术改写。");
+        return;
+    }
     QString text = ui->m_noteEdit->toPlainText().trimmed();
     if (text.isEmpty()) {
         QMessageBox::information(this, "提示", "请先在左侧写入笔记内容。");
@@ -414,7 +462,7 @@ void MainWindow::onPolish() {
     setNoteButtonsEnabled(false);
     m_lastNoteText = text;
     m_streamingText.clear();
-    ui->m_noteStatus->setText("语法润色中…");
+    ui->m_noteStatus->setText("学术改写中…");
     ui->m_polishView->clear();
     m_notes->requestPolishStream(text);
 }
@@ -424,7 +472,7 @@ void MainWindow::onNotesChunk(const QString &chunk) {
     // 判断当前是摘要还是润色：看状态栏文本
     if (ui->m_noteStatus->text().contains("摘要"))
         ui->m_summaryView->setPlainText(m_streamingText);
-    else if (ui->m_noteStatus->text().contains("润色"))
+    else if (ui->m_noteStatus->text().contains("改写"))
         ui->m_polishView->setPlainText(m_streamingText);
 }
 
@@ -436,7 +484,10 @@ void MainWindow::onNewNote() {
 void MainWindow::onSaveNote() {
     QString content = ui->m_noteEdit->toPlainText();
     if (content.isEmpty()) {
-        QMessageBox::information(this, "提示", "笔记内容为空，未保存。");
+        QMessageBox::information(this, "提示",
+            m_currentContentType == "document"
+                ? "文献内容为空，未保存。"
+                : "笔记内容为空，未保存。");
         return;
     }
     QString title = ui->m_noteTitle->text().trimmed();
@@ -444,6 +495,19 @@ void MainWindow::onSaveNote() {
 
     // ---- 1) 本地 .md 文件（始终执行，不依赖 MySQL）----
     bool localOk = saveNoteToLocal();
+    if (localOk && m_currentNoteId.isEmpty())
+        m_currentNoteId = stableDocumentId(m_currentLocalPath);
+    if (localOk) {
+        ContentItem item;
+        item.id = m_currentNoteId;
+        item.title = title;
+        item.filePath = m_currentLocalPath;
+        item.type = m_currentContentType;
+        item.sourcePath = m_importSourcePath;
+        m_db->upsertContentItem(item);
+        if (m_currentContentType == "note")
+            m_db->setLinkedDocuments(m_currentNoteId, m_linkedDocumentIds);
+    }
 
     // ---- 2) MySQL（全自动：未连接时静默重试一次）----
     bool dbOk = false;
@@ -452,8 +516,6 @@ void MainWindow::onSaveNote() {
         tryReconnectDbSilently();
     }
     if (m_db->isOpen()) {
-        if (m_currentNoteId.isEmpty())
-            m_currentNoteId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         Note n;
         n.id = m_currentNoteId;
         n.title = title;
@@ -472,10 +534,9 @@ void MainWindow::onSaveNote() {
             }
         }
 
-        if (dbOk) {
-            indexCurrentNote();   // 验证通过后才建向量索引
-        }
     }
+    if (localOk && m_currentContentType == "document")
+        indexCurrentNote();
 
     // 状态反馈
     m_noteDirty = false;
@@ -502,21 +563,27 @@ void MainWindow::onSaveNote() {
 }
 
 void MainWindow::indexCurrentNote() {
+    if (m_currentContentType != "document") return;
     QString text = ui->m_noteEdit->toPlainText().trimmed();
     if (text.isEmpty() || m_currentNoteId.isEmpty()) return;
-    ui->m_noteStatus->setText("建立向量索引中…");
-    m_rag->requestIndex(m_currentNoteId, text);
+    ui->m_noteStatus->setText(
+        "正在增量更新文献索引… 首次处理长 PDF 可能需要数分钟，请勿关闭程序");
+    QString source = !m_importSourcePath.isEmpty()
+        ? m_importSourcePath : m_currentLocalPath;
+    m_rag->requestIndex(
+        m_currentNoteId, text, ui->m_noteTitle->text().trimmed(), source);
 }
 
 void MainWindow::onImportFile() {
     QString filePath = QFileDialog::getOpenFileName(
         this, "导入文档", QString(),
-        "PDF 文档 (*.pdf);;Word 文档 (*.docx)");
+        "支持的文档 (*.pdf *.docx *.txt *.md *.markdown);;PDF 文档 (*.pdf);;Word 文档 (*.docx);;文本/Markdown (*.txt *.md *.markdown)");
     if (filePath.isEmpty()) return;
     if (m_notesBusy) return;
     m_notesBusy = true;
     setNoteButtonsEnabled(false);
     ui->m_noteStatus->setText("导入解析中…");
+    m_importSourcePath = filePath;
     m_notes->requestImport(filePath);
 }
 
@@ -532,17 +599,20 @@ void MainWindow::onNotesResult(int type, const QString &text, const QString &err
         }
         // text 格式："title\ncontent"，按第一个 \n 拆分
         int sep = text.indexOf('\n');
-        QString title = (sep > 0) ? text.left(sep) : "导入笔记";
+        QString title = (sep > 0) ? text.left(sep) : "导入文献";
         QString content = (sep > 0) ? text.mid(sep + 1) : text;
         // 清空当前编辑状态，加载导入内容
         m_currentNoteId.clear();
         m_currentLocalPath.clear();
         m_ragHistory.clear();
+        m_currentContentType = "document";
+        m_linkedDocumentIds.clear();
         ui->m_noteTitle->setText(title);
         ui->m_noteEdit->setPlainText(content);
         m_noteDirty = true;
         updateWindowTitle();
-        ui->m_noteStatus->setText("导入成功 ✓（Ctrl+S 保存，可建索引后 RAG 问答）");
+        applyContentMode();
+        ui->m_noteStatus->setText("文献导入成功 ✓（Ctrl+S 保存并建立索引）");
         return;
     }
 
@@ -565,7 +635,7 @@ void MainWindow::onNotesResult(int type, const QString &text, const QString &err
         ui->m_resultTabs->setCurrentWidget(ui->tabSummary);
     } else if (type == NotesClient::Polish) {
         showPolishDiff(m_lastNoteText, result);
-        ui->m_noteStatus->setText("润色完成 ✓（绿=新增，红删除线=原文）");
+        ui->m_noteStatus->setText("学术改写完成 ✓（绿=新增，红删除线=原文）");
         saveAiResult("polish", result);
         ui->m_resultTabs->setCurrentWidget(ui->tabPolish);
     }
@@ -590,11 +660,20 @@ void MainWindow::refreshNoteList() {
         QList<Note> dbNotes = m_db->loadAllNotes();
         for (const Note &n : dbNotes) {
             const QString title = n.title.isEmpty() ? "未命名笔记" : n.title;
+            ContentItem meta = m_db->loadContentItem(n.id);
+            if (meta.type.isEmpty() && n.content.contains("[[PAGE:")) {
+                meta.id = n.id;
+                meta.title = title;
+                meta.type = "document";
+                m_db->upsertContentItem(meta);
+            }
+            QString kind = meta.type == "document" ? "文献" : "笔记";
             QListWidgetItem *it = new QListWidgetItem(
-                QString("%1\n%2").arg(title, n.updatedAt));
+                QString("[%1] %2\n%3").arg(kind, title, n.updatedAt));
             it->setData(Qt::UserRole, n.id);       // 存储 DB id
             it->setToolTip(title);
             it->setData(Qt::UserRole + 1, "db");   // 标记为 DB 来源
+            it->setData(Qt::UserRole + 2, title);
             ui->m_noteList->addItem(it);
             databaseTitles.insert(title);
         }
@@ -604,11 +683,28 @@ void MainWindow::refreshNoteList() {
     QList<LocalNote> localNotes = scanLocalNotes();
     for (const LocalNote &ln : localNotes) {
         if (databaseTitles.contains(ln.title)) continue;
+        const QString contentId = stableDocumentId(ln.filePath);
+        ContentItem meta = m_db->loadContentItem(contentId);
+        if (meta.type.isEmpty()) {
+            QFile file(ln.filePath);
+            if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                const QString content = QString::fromUtf8(file.readAll());
+                if (content.contains("[[PAGE:")) {
+                    meta.id = contentId;
+                    meta.title = ln.title;
+                    meta.filePath = ln.filePath;
+                    meta.type = "document";
+                    m_db->upsertContentItem(meta);
+                }
+            }
+        }
+        QString kind = meta.type == "document" ? "文献" : "笔记";
         QListWidgetItem *it = new QListWidgetItem(
-            QString("%1\n%2").arg(ln.title, ln.mtime));
+            QString("[%1] %2\n%3").arg(kind, ln.title, ln.mtime));
         it->setData(Qt::UserRole, ln.filePath);
         it->setToolTip(ln.filePath);
         it->setData(Qt::UserRole + 1, "local");
+        it->setData(Qt::UserRole + 2, ln.title);
         ui->m_noteList->addItem(it);
     }
     ui->m_noteList->blockSignals(false);
@@ -626,11 +722,21 @@ void MainWindow::loadNoteIntoEditor(const QString &id) {
     if (n.id.isEmpty()) return;
     m_currentNoteId = n.id;
     m_currentLocalPath.clear();
+    m_importSourcePath.clear();
+    ContentItem item = m_db->loadContentItem(id);
+    m_currentContentType = item.type.isEmpty() ? "note" : item.type;
+    if (item.type.isEmpty() && n.content.contains("[[PAGE:"))
+        m_currentContentType = "document";
+    m_importSourcePath = item.sourcePath;
+    m_linkedDocumentIds = m_db->loadLinkedDocuments(id);
     m_ragHistory.clear();
     ui->m_noteTitle->setText(n.title);
     ui->m_noteEdit->setPlainText(n.content);
     ui->m_qaInput->clear();
-    ui->m_noteStatus->setText("已载入笔记：" + (n.title.isEmpty() ? "未命名笔记" : n.title));
+    ui->m_noteStatus->setText(
+        (m_currentContentType == "document" ? "已载入文献：" : "已载入笔记：")
+        + (n.title.isEmpty() ? "未命名笔记" : n.title));
+    applyContentMode();
 }
 
 void MainWindow::onNoteSelected(QListWidgetItem *current, QListWidgetItem *) {
@@ -645,13 +751,23 @@ void MainWindow::onNoteSelected(QListWidgetItem *current, QListWidgetItem *) {
         if (!n.id.isEmpty()) {
             m_currentNoteId = n.id;
             m_currentLocalPath.clear();
+            m_importSourcePath.clear();
+            ContentItem item = m_db->loadContentItem(n.id);
+            m_currentContentType = item.type.isEmpty() ? "note" : item.type;
+            if (item.type.isEmpty() && n.content.contains("[[PAGE:"))
+                m_currentContentType = "document";
+            m_importSourcePath = item.sourcePath;
+            m_linkedDocumentIds = m_db->loadLinkedDocuments(n.id);
             m_ragHistory.clear();
             ui->m_noteTitle->setText(n.title);
             ui->m_noteEdit->setPlainText(n.content);
             ui->m_qaInput->clear();
             m_noteDirty = false;
             updateWindowTitle();
-            ui->m_noteStatus->setText("已载入笔记：" + (n.title.isEmpty() ? "未命名笔记" : n.title));
+            ui->m_noteStatus->setText(
+                (m_currentContentType == "document" ? "已载入文献：" : "已载入笔记：")
+                + (n.title.isEmpty() ? "未命名笔记" : n.title));
+            applyContentMode();
         }
         populateHistories();   // 切换笔记后刷新该笔记的 AI 历史
     }
@@ -660,15 +776,21 @@ void MainWindow::onNoteSelected(QListWidgetItem *current, QListWidgetItem *) {
 void MainWindow::onDeleteNote() {
     QListWidgetItem *cur = ui->m_noteList->currentItem();
     if (!cur) {
-        QMessageBox::information(this, "提示", "请先在左侧列表中选择要删除的笔记。");
+        QMessageBox::information(this, "提示", "请先在左侧列表中选择要删除的内容。");
         return;
     }
     QString id = cur->data(Qt::UserRole).toString();
     QString source = cur->data(Qt::UserRole + 1).toString();
     if (id.isEmpty()) return;
-    QString title = cur->text().split("\n").first();
-    if (QMessageBox::question(this, "删除笔记",
-            QString("确定删除笔记「%1」？此操作不可撤销。").arg(title),
+    QString title = cur->data(Qt::UserRole + 2).toString();
+    if (title.isEmpty()) title = cur->text().split("\n").first();
+    const QString contentId = source == "local" ? stableDocumentId(id) : id;
+    ContentItem deletedItem = m_db->loadContentItem(contentId);
+    const bool isDocument = deletedItem.type == "document"
+        || cur->text().startsWith("[文献]");
+    const QString kind = isDocument ? "文献" : "笔记";
+    if (QMessageBox::question(this, "删除" + kind,
+            QString("确定删除%1「%2」？此操作不可撤销。").arg(kind, title),
             QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
         return;
 
@@ -683,8 +805,6 @@ void MainWindow::onDeleteNote() {
     // 删除 MySQL 记录（如果连接了）
     if (source == "db" && m_db->isOpen()) {
         deleted = m_db->deleteNote(id);
-        // 同步删除向量索引
-        m_rag->requestDelete(id);
         if (deleted)
             deleteLocalNote(localNotePath(m_notesDir, title));
         if (!deleted)
@@ -696,11 +816,14 @@ void MainWindow::onDeleteNote() {
     }
 
     if (deleted) {
+        if (isDocument)
+            m_rag->requestDelete(contentId);
+        m_db->deleteContentItem(contentId);
         if ((source == "local" && id == m_currentLocalPath) ||
             (source == "db" && id == m_currentNoteId))
             newNote();
         refreshNoteList();
-        ui->m_noteStatus->setText("已删除笔记：" + title);
+        ui->m_noteStatus->setText("已删除" + kind + "：" + title);
     }
 }
 
@@ -744,9 +867,8 @@ void MainWindow::autoSaveDraft() {
     // AI 操作前静默保存当前内容到本地草稿，防止丢失
     // 仅在用户已输入内容时才存
     if (ui->m_noteEdit->toPlainText().trimmed().isEmpty()) return;
-    if (m_currentNoteId.isEmpty())
-        m_currentNoteId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    saveNoteToLocal();  // 静默失败也不影响 AI 功能
+    if (saveNoteToLocal() && m_currentNoteId.isEmpty())
+        m_currentNoteId = stableDocumentId(m_currentLocalPath);
 }
 
 void MainWindow::updateWindowTitle() {
@@ -768,15 +890,25 @@ void MainWindow::loadLocalNoteIntoEditor(const QString &filePath) {
     f.close();
 
     m_currentLocalPath = filePath;
+    m_importSourcePath.clear();
     // 本地笔记用文件路径作为历史记录关联标识（Ctrl+S 同步 MySQL 后换为 UUID）
-    m_currentNoteId.clear();
+    m_currentNoteId = stableDocumentId(filePath);
+    ContentItem item = m_db->loadContentItem(m_currentNoteId);
+    m_currentContentType = item.type.isEmpty() ? "note" : item.type;
+    if (item.type.isEmpty() && content.contains("[[PAGE:"))
+        m_currentContentType = "document";
+    m_importSourcePath = item.sourcePath;
+    m_linkedDocumentIds = m_db->loadLinkedDocuments(m_currentNoteId);
     m_ragHistory.clear();
     ui->m_noteTitle->setText(QFileInfo(filePath).completeBaseName());
     ui->m_noteEdit->setPlainText(content);
     ui->m_qaInput->clear();
     m_noteDirty = false;
     updateWindowTitle();
-    ui->m_noteStatus->setText("已载入本地笔记：" + QFileInfo(filePath).completeBaseName());
+    ui->m_noteStatus->setText(
+        (m_currentContentType == "document" ? "已载入本地文献：" : "已载入本地笔记：")
+        + QFileInfo(filePath).completeBaseName());
+    applyContentMode();
     populateHistories();   // 切换到本地笔记后刷新历史
 }
 void MainWindow::populateHistories() {
@@ -840,11 +972,15 @@ void MainWindow::onRagHistoryClicked(QListWidgetItem *item) {
 
 // ---------------- 笔记页 · RAG ----------------
 // 架构：C++ 负责切块触发/检索结果组装/Prompt 拼装/LLM 生成；
-//       仅「向量化 + 向量库检索」这一段交给 Python（Chroma）。
+//       「本地 Jina 向量化 + Milvus Lite 混合检索」由 Python 完成。
 void MainWindow::onIndexNote() {
+    if (m_currentContentType != "document") {
+        QMessageBox::information(this, "提示", "只有导入的文献需要建立检索索引。");
+        return;
+    }
     QString text = ui->m_noteEdit->toPlainText().trimmed();
     if (text.isEmpty()) {
-        QMessageBox::information(this, "提示", "请先写入笔记内容再建立索引。");
+        QMessageBox::information(this, "提示", "当前文献没有可建立索引的文本内容。");
         return;
     }
     if (m_currentNoteId.isEmpty())
@@ -852,30 +988,86 @@ void MainWindow::onIndexNote() {
     indexCurrentNote();
 }
 
+void MainWindow::onSelectLinkedDocuments() {
+    if (m_currentContentType == "document") return;
+    if (m_currentNoteId.isEmpty())
+        autoSaveDraft();
+    QList<ContentItem> documents = m_db->loadDocuments();
+    if (documents.isEmpty()) {
+        QMessageBox::information(this, "关联文献",
+            "当前没有已保存的文献，请先导入文献并保存。");
+        return;
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle("选择关联文献");
+    dialog.resize(520, 420);
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *label = new QLabel("RAG 问答只会检索勾选的文献：", &dialog);
+    auto *list = new QListWidget(&dialog);
+    for (const ContentItem &document : documents) {
+        auto *item = new QListWidgetItem(document.title, list);
+        item->setData(Qt::UserRole, document.id);
+        item->setToolTip(document.sourcePath);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(
+            m_linkedDocumentIds.contains(document.id) ? Qt::Checked : Qt::Unchecked);
+    }
+    auto *buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(label);
+    layout->addWidget(list);
+    layout->addWidget(buttons);
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    m_linkedDocumentIds.clear();
+    for (int i = 0; i < list->count(); ++i) {
+        QListWidgetItem *item = list->item(i);
+        if (item->checkState() == Qt::Checked)
+            m_linkedDocumentIds.append(item->data(Qt::UserRole).toString());
+    }
+    if (!m_currentNoteId.isEmpty())
+        m_db->setLinkedDocuments(m_currentNoteId, m_linkedDocumentIds);
+    m_noteDirty = true;
+    updateWindowTitle();
+    applyContentMode();
+}
+
 void MainWindow::onRagQA() {
     QString q = ui->m_qaInput->text().trimmed();
-    QString ctx = ui->m_noteEdit->toPlainText().trimmed();
     if (q.isEmpty()) {
         QMessageBox::information(this, "提示", "请在右上角输入框输入你的问题。");
         return;
     }
-    if (ctx.isEmpty() && !m_globalRag->isChecked()) {
-        QMessageBox::information(this, "提示", "笔记内容为空，无法进行 RAG 问答。\n（勾选「全局检索」可跨笔记搜索）");
-        return;
+    QStringList documentIds;
+    if (!m_globalRag->isChecked()) {
+        if (m_currentContentType == "document") {
+            if (m_currentNoteId.isEmpty()) {
+                QMessageBox::information(this, "提示", "请先保存文献并建立索引。");
+                return;
+            }
+            documentIds << m_currentNoteId;
+        } else {
+            documentIds = m_linkedDocumentIds;
+            if (documentIds.isEmpty()) {
+                QMessageBox::information(this, "提示",
+                    "当前笔记尚未关联文献，请点击“关联文献”进行选择。");
+                return;
+            }
+        }
     }
-    if (m_currentNoteId.isEmpty() && !m_globalRag->isChecked())
-        m_currentNoteId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     m_ragQuestion = q;
-    autoSaveDraft();
+    if (m_currentContentType == "note") autoSaveDraft();
     if (m_ragBusy) return;
     m_ragBusy = true;
     setNoteButtonsEnabled(false);
     ui->m_noteStatus->setText("RAG 检索中…");
     ui->m_ragView->clear();
     m_streamingText.clear();
-    // 全局检索时传空 noteId
-    QString noteId = m_globalRag->isChecked() ? QString() : m_currentNoteId;
-    m_rag->requestRetrieve(noteId, q, 10);
+    m_ragSourcesText.clear();
+    m_rag->requestRetrieve(documentIds, q, m_ragHistory, 10);
 }
 
 void MainWindow::onRagResult(int type, const QString &text, const QString &error) {
@@ -905,19 +1097,48 @@ void MainWindow::onRagResult(int type, const QString &text, const QString &error
     if (arr.isEmpty()) {
         m_ragBusy = false;
         setNoteButtonsEnabled(true);
-        ui->m_ragView->setPlainText(
-            "该笔记尚未建立向量索引。请先点「建立索引」（保存笔记时会自动建索引），再做 RAG 问答。");
-        ui->m_noteStatus->setText("未建立索引");
+        if (m_globalRag->isChecked()) {
+            ui->m_ragView->setPlainText(
+                "全部文献中未检索到相关内容。请确认文献已保存并完成索引，或换一种问法。");
+        } else if (m_currentContentType == "document") {
+            ui->m_ragView->setPlainText(
+                "当前文献未检索到相关内容。请确认索引已完成，或换一种更具体的问法。");
+        } else {
+            ui->m_ragView->setPlainText(
+                "关联文献中未检索到相关内容。请检查关联范围和文献索引，或换一种问法。");
+        }
+        ui->m_noteStatus->setText("未检索到相关内容");
         return;
     }
+    QJsonArray sources = obj.value("sources").toArray();
     QStringList chunks;
-    for (const QJsonValue &v : arr) chunks.append(v.toString());
+    QStringList sourceLines;
+    for (int i = 0; i < arr.size(); ++i) {
+        QString chunk = arr.at(i).toString();
+        QJsonObject source = i < sources.size()
+            ? sources.at(i).toObject() : QJsonObject();
+        QString title = source.value("title").toString("未命名文献");
+        int page = source.value("page").toInt();
+        QString label = QString("[%1] %2").arg(i + 1).arg(title);
+        if (page > 0)
+            label += QString("，第 %1 页").arg(page);
+        chunks.append(label + "\n" + chunk);
+
+        QString sourceLine = label;
+        QString path = source.value("source").toString();
+        if (!path.isEmpty())
+            sourceLine += "\n    " + path;
+        sourceLines.append(sourceLine);
+    }
     QString context = chunks.join("\n\n----\n\n");
+    if (!sourceLines.isEmpty())
+        m_ragSourcesText = "\n\n【参考来源】\n" + sourceLines.join("\n");
 
     // 组装增强 Prompt：基于检索片段 + 对话历史回答
-    QString sys = "你是笔记问答助手。请综合【参考片段】和【之前的对话上下文】回答用户问题。"
+    QString sys = "你是严谨的文献问答助手。请综合【参考片段】和【之前的对话上下文】回答用户问题。"
                   "若用户追问，优先结合之前的对话上下文理解问题意图。"
-                  "若参考片段和对话历史中都未提及，请说明「笔记中未提及该内容」，不要凭空编造。";
+                  "回答中的关键事实必须使用对应片段编号标注来源，例如[1][2]。"
+                  "若参考片段和对话历史中都未提及，请说明「文献中未提及该内容」，不要凭空编造。";
     // 追问时加提示，帮助 LLM 理解上下文
     QString user;
     if (!m_ragHistory.isEmpty()) {
@@ -953,8 +1174,9 @@ void MainWindow::onRagGenerated(const QString &reply, const QString &error) {
     }
     // 流式模式：reply 为空，使用累积的 m_streamingText
     QString answer = reply.isEmpty() ? m_streamingText : reply;
+    answer += m_ragSourcesText;
     ui->m_ragView->setPlainText(answer);
-    ui->m_noteStatus->setText("RAG 问答完成 ✓（已基于检索片段生成）");
+    ui->m_noteStatus->setText("文献问答完成 ✓（已附来源引用）");
     saveAiResult("rag", answer);
     ui->m_resultTabs->setCurrentWidget(ui->tabRag);
     // 多轮：将本轮 Q&A 追加到历史，保留最近 10 轮
@@ -1006,7 +1228,9 @@ void MainWindow::onImgAnalyze() {
     m_imageUi->btnImgAnalyze->setEnabled(false);
     m_imgUserContent = m_imgPrompt->text().trimmed();
     if (m_imgUserContent.isEmpty())
-        m_imgUserContent = "请分析这张图片的内容，尽量详细。";
+        m_imgUserContent =
+            "请作为文献图表分析助手，识别图表类型、标题、坐标轴、图例、关键数值与趋势，"
+            "解释图表支持的结论及可能的限制。无法确认的信息请明确说明，不要猜测。";
     ChatMessage um;
     um.role = "user";
     um.content = m_imgUserContent;
@@ -1091,25 +1315,31 @@ void MainWindow::onMemTimer() {
 }
 
 void MainWindow::onClearEdit() {
-    ui->m_noteEdit->clear();
+    if (m_currentContentType == "document") {
+        QMessageBox::information(this, "文献只读",
+            "文献原文不能清空或改写；已仅清空右侧 AI 结果。");
+    } else {
+        ui->m_noteEdit->clear();
+        m_noteDirty = true;
+        updateWindowTitle();
+    }
     ui->m_summaryView->clear();
     ui->m_polishView->clear();
     ui->m_ragView->clear();
 }
 
 void MainWindow::onAbout() {
-    QMessageBox::about(this, "关于 智能笔记软件",
-        "Qt5 + FastAPI + MySQL 智能笔记\n\n"
+    QMessageBox::about(this, "关于 文献智能笔记",
+        "Qt5 + FastAPI 文献智能笔记\n\n"
         "架构：Qt 客户端（C++ 主导）→ 本地 FastAPI 后端 → 云端大模型\n"
-        "功能：智能摘要 / 语法润色 / RAG 知识问答 / 图片分析\n"
-        "  • 摘要与润色支持流式输出，逐字显示\n"
-        "  • RAG 支持多轮追问与跨笔记全局检索\n"
-        "  • 图片分析支持自定义提示词\n"
-        "  • 笔记全文搜索（Ctrl+F 搜索框）\n"
+        "  • 文献：导入后只读，可生成摘要、建立索引并进行带引用问答\n"
+        "  • 笔记：自由写作，可进行摘要和学术改写，不进入向量库\n"
+        "  • 笔记可指定关联文献；“全部文献”仅在主动勾选时启用\n"
+        "  • 本地 Jina Embedding + Milvus Lite + BM25 混合检索\n"
+        "  • 文献图表解析支持自定义提示词\n"
+        "  • 文献与笔记全文搜索（Ctrl+F 搜索框）\n"
         "  • Markdown 预览模式（Ctrl+P 切换）\n"
-        "RAG：C++ 负责检索结果组装、Prompt 拼装与 LLM 生成；\n"
-        "     仅「向量化 + 向量库检索」由 Python(Chroma) 完成。\n"
-        "快捷键：Ctrl+1 摘要，Ctrl+2 润色，Ctrl+4 RAG问答，Ctrl+P 预览。");
+        "快捷键：Ctrl+1 摘要，Ctrl+2 学术改写，Ctrl+4 文献问答，Ctrl+P 预览。");
 }
 
 // ---------------- 笔记搜索 ----------------
@@ -1146,8 +1376,8 @@ void MainWindow::togglePreviewMode() {
         ui->m_noteEdit->setHtml(html);
     } else {
         // 切回编辑：恢复纯文本
-        ui->m_noteEdit->setReadOnly(false);
         ui->m_noteEdit->setPlainText(m_savedEditText);
+        applyContentMode();
     }
 }
 

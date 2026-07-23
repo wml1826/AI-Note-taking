@@ -219,6 +219,128 @@ bool DbManager::ensureResultsTable() {
     return true;
 }
 
+bool DbManager::ensureContentTables() {
+    if (!m_local.isOpen()) return false;
+    QSqlQuery q(m_local);
+    if (!q.exec("CREATE TABLE IF NOT EXISTS content_items ("
+                "id TEXT PRIMARY KEY, title TEXT NOT NULL, file_path TEXT, "
+                "item_type TEXT NOT NULL, source_path TEXT, updated_at TEXT)")) {
+        m_err = q.lastError().text();
+        return false;
+    }
+    if (!q.exec("CREATE TABLE IF NOT EXISTS note_document_links ("
+                "note_id TEXT NOT NULL, document_id TEXT NOT NULL, "
+                "PRIMARY KEY(note_id, document_id))")) {
+        m_err = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool DbManager::upsertContentItem(const ContentItem &item) {
+    if (!m_local.isOpen()) return false;
+    QSqlQuery q(m_local);
+    q.prepare("INSERT OR REPLACE INTO content_items "
+              "(id, title, file_path, item_type, source_path, updated_at) "
+              "VALUES (?, ?, ?, ?, ?, ?)");
+    q.addBindValue(item.id);
+    q.addBindValue(item.title);
+    q.addBindValue(item.filePath);
+    q.addBindValue(item.type);
+    q.addBindValue(item.sourcePath);
+    q.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
+    if (!q.exec()) {
+        m_err = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+ContentItem DbManager::loadContentItem(const QString &id) {
+    ContentItem item;
+    if (!m_local.isOpen()) return item;
+    QSqlQuery q(m_local);
+    q.prepare("SELECT id, title, file_path, item_type, source_path "
+              "FROM content_items WHERE id=?");
+    q.addBindValue(id);
+    if (q.exec() && q.next()) {
+        item.id = q.value(0).toString();
+        item.title = q.value(1).toString();
+        item.filePath = q.value(2).toString();
+        item.type = q.value(3).toString();
+        item.sourcePath = q.value(4).toString();
+    }
+    return item;
+}
+
+QList<ContentItem> DbManager::loadDocuments() {
+    QList<ContentItem> items;
+    if (!m_local.isOpen()) return items;
+    QSqlQuery q(m_local);
+    if (q.exec("SELECT id, title, file_path, item_type, source_path "
+               "FROM content_items WHERE item_type='document' "
+               "ORDER BY title COLLATE NOCASE")) {
+        while (q.next()) {
+            ContentItem item;
+            item.id = q.value(0).toString();
+            item.title = q.value(1).toString();
+            item.filePath = q.value(2).toString();
+            item.type = q.value(3).toString();
+            item.sourcePath = q.value(4).toString();
+            items.append(item);
+        }
+    }
+    return items;
+}
+
+bool DbManager::setLinkedDocuments(const QString &noteId,
+                                   const QStringList &documentIds) {
+    if (!m_local.isOpen() || noteId.isEmpty()) return false;
+    if (!m_local.transaction()) return false;
+    QSqlQuery q(m_local);
+    q.prepare("DELETE FROM note_document_links WHERE note_id=?");
+    q.addBindValue(noteId);
+    if (!q.exec()) {
+        m_local.rollback();
+        return false;
+    }
+    q.prepare("INSERT INTO note_document_links(note_id, document_id) VALUES(?, ?)");
+    for (const QString &documentId : documentIds) {
+        q.bindValue(0, noteId);
+        q.bindValue(1, documentId);
+        if (!q.exec()) {
+            m_local.rollback();
+            return false;
+        }
+    }
+    return m_local.commit();
+}
+
+QStringList DbManager::loadLinkedDocuments(const QString &noteId) {
+    QStringList ids;
+    if (!m_local.isOpen() || noteId.isEmpty()) return ids;
+    QSqlQuery q(m_local);
+    q.prepare("SELECT document_id FROM note_document_links "
+              "WHERE note_id=? ORDER BY document_id");
+    q.addBindValue(noteId);
+    if (q.exec())
+        while (q.next()) ids.append(q.value(0).toString());
+    return ids;
+}
+
+bool DbManager::deleteContentItem(const QString &id) {
+    if (!m_local.isOpen()) return false;
+    QSqlQuery q(m_local);
+    q.prepare("DELETE FROM note_document_links "
+              "WHERE note_id=? OR document_id=?");
+    q.addBindValue(id);
+    q.addBindValue(id);
+    q.exec();
+    q.prepare("DELETE FROM content_items WHERE id=?");
+    q.addBindValue(id);
+    return q.exec();
+}
+
 bool DbManager::saveResult(AiResult &r) {
     if (!m_local.isOpen()) return false;
     QSqlQuery q(m_local);

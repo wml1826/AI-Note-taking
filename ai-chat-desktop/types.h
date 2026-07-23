@@ -52,3 +52,11 @@ struct AiResult {
     QString content;       // 结果正文（润色存润色后文本）
     QString createdAt;     // 生成时间字符串
 };
+
+struct ContentItem {
+    QString id;
+    QString title;
+    QString filePath;
+    QString type;          // "document" | "note"
+    QString sourcePath;    // 原始 PDF/Word 路径，仅文献使用
+};

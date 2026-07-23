@@ -14,8 +14,6 @@ venv/
 env/
 ENV/
 
-chroma_data/
-chroma_data.bak/
 .env
 
 *.pro.user
@@ -26,3 +24,10 @@ chroma_data.bak/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 运行时生成的本地数据（不入库）
+.workbuddy/
+.agents/
+*.hf_modules/
+literature_catalog.sqlite3
+literature_milvus.db/

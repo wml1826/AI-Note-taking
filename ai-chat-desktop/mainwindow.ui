@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>智能笔记软件 (Qt + FastAPI + MySQL)</string>
+   <string>文献智能笔记 (Qt + FastAPI + RAG)</string>
   </property>
   <widget class="QWidget" name="centralwidget">
    <layout class="QHBoxLayout" name="topLayout" stretch="0,1">
@@ -28,12 +28,12 @@
       </property>
       <item>
        <property name="text">
-        <string>笔记</string>
+        <string>文献库</string>
        </property>
       </item>
       <item>
        <property name="text">
-        <string>图片分析</string>
+        <string>图表解析</string>
        </property>
       </item>
       <item>
@@ -86,7 +86,7 @@
           <item>
            <widget class="QPushButton" name="btnDeleteNote">
             <property name="toolTip">
-             <string>删除当前在左侧列表选中的笔记</string>
+             <string>删除当前在左侧列表选中的文献或笔记</string>
             </property>
             <property name="text">
              <string>删除</string>
@@ -114,7 +114,7 @@
             </size>
            </property>
            <property name="toolTip">
-            <string>已保存的笔记（点击载入到编辑器；可在右侧编辑后「保存到MySQL」更新）</string>
+            <string>文献与笔记列表：文献只读并进入索引，笔记可编辑且不进入索引</string>
            </property>
           </widget>
           <widget class="QTextEdit" name="m_noteEdit">
@@ -125,7 +125,7 @@
             </sizepolicy>
            </property>
            <property name="placeholderText">
-            <string>在这里写笔记… 选中文字后可做摘要/润色，或在右侧用 RAG 问答。</string>
+            <string>文献用于只读检索与摘要；笔记用于写作、学术改写，并可选择关联文献问答。</string>
            </property>
           </widget>
           <widget class="QWidget" name="rightContainer" native="true">
@@ -135,14 +135,14 @@
               <item>
                <widget class="QPushButton" name="btnSummary">
                 <property name="text">
-                 <string>智能摘要 (Ctrl+1)</string>
+                 <string>结构化摘要 (Ctrl+1)</string>
                 </property>
                </widget>
               </item>
               <item>
                <widget class="QPushButton" name="btnPolish">
                 <property name="text">
-                 <string>语法润色 (Ctrl+2)</string>
+                 <string>学术改写 (Ctrl+2)</string>
                 </property>
                </widget>
               </item>
@@ -153,7 +153,7 @@
               <item>
                <widget class="QLineEdit" name="m_qaInput">
                 <property name="placeholderText">
-                 <string>向这篇笔记提问（RAG 检索增强）…</string>
+                 <string>向当前文献或笔记已关联的文献提问；也可主动选择全部文献…</string>
                 </property>
                </widget>
               </item>
@@ -164,10 +164,10 @@
               <item>
                <widget class="QPushButton" name="btnIndex">
                 <property name="toolTip">
-                 <string>对本篇笔记切块并向量化，存入向量库（Python 端 Chroma）供 RAG 检索</string>
+                 <string>使用本地 Jina 模型向量化，并写入 Milvus Lite Dense/Sparse 混合索引</string>
                 </property>
                 <property name="text">
-                 <string>建立索引</string>
+                 <string>更新文献索引</string>
                 </property>
                </widget>
               </item>
@@ -177,7 +177,7 @@
                  <string>先用向量检索召回相关片段，再让大模型基于片段回答（避免凭空编造）</string>
                 </property>
                 <property name="text">
-                 <string>RAG问答 (Ctrl+4)</string>
+                 <string>文献问答 (Ctrl+4)</string>
                 </property>
                </widget>
               </item>
@@ -203,7 +203,7 @@
               </property>
               <widget class="QWidget" name="tabSummary">
                <attribute name="title">
-                <string>智能摘要</string>
+                <string>结构化摘要</string>
                </attribute>
                <layout class="QVBoxLayout" name="tabSummaryLayout">
                 <item>
@@ -233,7 +233,7 @@
               </widget>
               <widget class="QWidget" name="tabPolish">
                <attribute name="title">
-                <string>语法润色</string>
+                <string>学术写作</string>
                </attribute>
                <layout class="QVBoxLayout" name="tabPolishLayout">
                 <item>
@@ -263,7 +263,7 @@
               </widget>
               <widget class="QWidget" name="tabRag">
                <attribute name="title">
-                <string>RAG 问答</string>
+                <string>带引用问答</string>
                </attribute>
                <layout class="QVBoxLayout" name="tabRagLayout">
                 <item>

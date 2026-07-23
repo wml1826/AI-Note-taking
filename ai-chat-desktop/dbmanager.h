@@ -2,6 +2,7 @@
 #include <QObject>
 #include <QSqlDatabase>
 #include <QList>
+#include <QStringList>
 #include "types.h"
 
 // 通过 QODBC 连接 MySQL（Qt5 预编译版自带 QODBC 插件，无需自编译 QMYSQL）
@@ -35,6 +36,15 @@ public:
     bool saveResult(AiResult &r);                  // 存入一条结果
     QList<AiResult> loadResults(const QString &type); // 按功能取历史（新→旧）
     QList<AiResult> loadResults(const QString &type, const QString &noteId); // +按笔记筛选
+
+    // ---- 本地内容类型与笔记-文献关联 ----
+    bool ensureContentTables();
+    bool upsertContentItem(const ContentItem &item);
+    ContentItem loadContentItem(const QString &id);
+    QList<ContentItem> loadDocuments();
+    bool setLinkedDocuments(const QString &noteId, const QStringList &documentIds);
+    QStringList loadLinkedDocuments(const QString &noteId);
+    bool deleteContentItem(const QString &id);
 
 private:
     QSqlDatabase m_db;        // MySQL（笔记）

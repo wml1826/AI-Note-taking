@@ -67,6 +67,7 @@ private slots:
     void onRagQA();                           // 检索 + 生成（Ctrl+4）
     void onRagResult(int type, const QString &text, const QString &error);
     void onRagGenerated(const QString &reply, const QString &error);
+    void onSelectLinkedDocuments();
 
     // 图片分析页
     void onImgSelect();
@@ -96,6 +97,7 @@ private:
     void showPolishDiff(const QString &orig, const QString &polished);
     void setNoteButtonsEnabled(bool on);
     void indexCurrentNote();
+    void applyContentMode();
     QString renderMarkdown(const QString &md);   // 轻量 Markdown → HTML
 
     // ---- 本地文件存储（.md）----
@@ -136,6 +138,8 @@ private:
     // 本地存储
     QString m_notesDir;
     QString m_currentLocalPath;
+    QString m_importSourcePath;
+    QString m_ragSourcesText;
     bool   m_noteDirty = false;
 
     // 笔记搜索
@@ -145,6 +149,9 @@ private:
     QString m_savedEditText;             // 切预览时暂存编辑内容
     // 全局检索开关
     QCheckBox *m_globalRag = nullptr;
+    QPushButton *m_linkDocumentsButton = nullptr;
     // 自定义图片分析提示词
     QLineEdit *m_imgPrompt = nullptr;
+    QString m_currentContentType = "note";
+    QStringList m_linkedDocumentIds;
 };

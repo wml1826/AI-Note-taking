@@ -17,10 +17,15 @@ public:
     explicit RagClient(QObject *parent = nullptr);
 
     void setBackend(const QString &url);
-    void setApiKey(const QString &k);   // embedding 用的 DashScope Key
+    void setRewriteConfig(const QString &provider, const QString &apiKey,
+                          const QString &baseUrl, const QString &model);
+    void setApiKey(const QString &k);   // 兼容旧配置；本地 Jina 不使用该 Key
 
-    void requestIndex(const QString &noteId, const QString &text);
-    void requestRetrieve(const QString &noteId, const QString &query, int topK = 10);
+    void requestIndex(const QString &noteId, const QString &text,
+                      const QString &title = QString(),
+                      const QString &source = QString());
+    void requestRetrieve(const QStringList &documentIds, const QString &query,
+                         const QList<ChatMessage> &history, int topK = 10);
     void requestDelete(const QString &noteId);  // 删除笔记索引
 
 signals:
@@ -32,4 +37,8 @@ private:
     QNetworkAccessManager *m_mgr;
     QString m_backend = "http://127.0.0.1:8000";
     QString m_apiKey;
+    QString m_rewriteProvider = "deepseek";
+    QString m_rewriteApiKey;
+    QString m_rewriteBaseUrl;
+    QString m_rewriteModel;
 };

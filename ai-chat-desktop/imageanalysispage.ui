@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>图片分析</string>
+   <string>文献图表解析</string>
   </property>
   <layout class="QVBoxLayout" name="imgLayout">
    <item>
@@ -67,14 +67,14 @@
      <item>
       <widget class="QPushButton" name="btnImgSelect">
        <property name="text">
-        <string>选择图片</string>
+        <string>选择图表</string>
        </property>
       </widget>
      </item>
      <item>
       <widget class="QPushButton" name="btnImgAnalyze">
        <property name="text">
-        <string>分析</string>
+        <string>解析图表</string>
        </property>
       </widget>
      </item>
@@ -105,7 +105,7 @@
       <string>border:1px solid #cbd5e1; background:#f8fafc;</string>
      </property>
      <property name="text">
-      <string>未选择图片</string>
+      <string>未选择文献图表</string>
      </property>
      <property name="alignment">
       <set>Qt::AlignCenter</set>
